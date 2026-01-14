@@ -4,8 +4,8 @@ CMD=$1
 VM_NAME=$2
 DISK_ALIAS=${3:-rootdisk}
 
-if [ -z "$VM_NAME" ]; then
-    echo "Usage: $0 <vm-name>"
+if [ -z "$CMD" -o -z "$VM_NAME" ]; then
+    echo "Usage: $0 <setup|query> <vm-name>"
     exit 1
 fi
 
@@ -31,7 +31,14 @@ case "$CMD" in
 # Boundaries are in nanoseconds: 1ms (1000000), 10ms (10000000), 100ms (100000000)
 echo "Setting up latency histogram..."
 kubectl exec "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
-    '{"execute": "block-latency-histogram-set", "arguments": {"id": "'$TARGET_ID'", "boundaries-write": [1000000, 10000000, 100000000]}}'
+    '{"execute": "block-latency-histogram-set", "arguments": {"id": "'$TARGET_ID'", "boundaries": [     1000000,
+                                                                                                       10000000,
+                                                                                                      100000000,
+                                                                                                     1000000000,
+                                                                                                    10000000000,
+                                                                                                    30000000000,
+                                                                                                    60000000000
+                                                                                                   ]}}'
 
   ;;
 
@@ -40,7 +47,7 @@ kubectl exec "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
 echo "Fetching stats for $DEVICE..."
 kubectl exec "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
     '{"execute": "query-blockstats"}' | \
-    jq --arg qdev "$DEVICE" '.return[] | select(.qdev == $qdev or .device == $qdev)'
+    jq --arg qdev "$DEVICE" '.return[] | select(.qdev == $qdev or .device == $qdev)' | jq 'reduce (paths(scalars) as $p | select(any($p[]; type == "string" and contains("histo"))) | {path: $p, value: getpath($p)}) as $item ({}; setpath($item.path; $item.value))'
   ;;
 
   *)
