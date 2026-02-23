@@ -1,0 +1,40 @@
+# SecurityContextConstraints for OCP.
+# The exporter needs:
+#   - hostPID: to see host PIDs so it can access /proc/<pid>/root/
+#   - privileged: to follow /proc/<pid>/root symlinks across mount namespaces
+#     and connect to UNIX sockets inside containers.
+#   - allowHostDirVolumePlugin: to mount the CRI-O socket from the host.
+#     NOTE: listing "hostPath" in volumes[] is NOT enough; this explicit field
+#     is required by the OpenShift SCC API.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: kubevirt-io-latency-exporter
+  annotations:
+    kubernetes.io/description: >
+      Allows the kubevirt-io-latency-exporter DaemonSet to access host PIDs
+      and privileged filesystem paths for QMP socket discovery.
+allowPrivilegedContainer: true
+allowHostPID: true
+allowHostPorts: false
+allowHostNetwork: false
+allowHostIPC: false
+allowHostDirVolumePlugin: true
+allowPrivilegeEscalation: true
+defaultAllowPrivilegeEscalation: true
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: RunAsAny
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+volumes:
+  - hostPath
+  - secret
+  - configMap
+  - emptyDir
+users:
+  - system:serviceaccount:openshift-cnv:kubevirt-io-latency-exporter
+groups: []

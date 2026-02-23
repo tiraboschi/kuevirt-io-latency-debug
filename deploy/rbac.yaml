@@ -1,0 +1,33 @@
+# openshift-cnv is created and owned by the HCO operator; do not declare it here.
+# It already carries openshift.io/cluster-monitoring: "true", so the cluster
+# monitoring Prometheus picks up ServiceMonitors in it automatically.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubevirt-io-latency-exporter
+  namespace: openshift-cnv
+---
+# The exporter itself does not call the Kubernetes API; RBAC is only needed so
+# that OCP can attach the SCC to the service account.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevirt-io-latency-exporter
+rules:
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["kubevirt-io-latency-exporter"]
+    verbs: ["use"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevirt-io-latency-exporter
+subjects:
+  - kind: ServiceAccount
+    name: kubevirt-io-latency-exporter
+    namespace: openshift-cnv
+roleRef:
+  kind: ClusterRole
+  name: kubevirt-io-latency-exporter
+  apiGroup: rbac.authorization.k8s.io

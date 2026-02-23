@@ -1,0 +1,21 @@
+# openshift-cnv carries openshift.io/cluster-monitoring: "true" (set by the HCO
+# operator), so this ServiceMonitor is picked up by the cluster monitoring
+# Prometheus — the same instance that already scrapes kubevirt_vmi_* metrics.
+# No extra configuration is required.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kubevirt-io-latency-exporter
+  namespace: openshift-cnv
+  labels:
+    app: kubevirt-io-latency-exporter
+spec:
+  selector:
+    matchLabels:
+      app: kubevirt-io-latency-exporter
+  endpoints:
+    - port: metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 20s
+      path: /metrics

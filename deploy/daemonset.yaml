@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kubevirt-io-latency-exporter
+  namespace: openshift-cnv
+  labels:
+    app: kubevirt-io-latency-exporter
+spec:
+  selector:
+    matchLabels:
+      app: kubevirt-io-latency-exporter
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: kubevirt-io-latency-exporter
+    spec:
+      serviceAccountName: kubevirt-io-latency-exporter
+
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubevirt.io/schedulable: "true"
+
+      # Required: the exporter reads /proc/<pid>/root of virt-launcher containers.
+      hostPID: true
+
+      # Run on every node including control-plane and infra nodes.
+      tolerations:
+        - operator: Exists
+
+      containers:
+        - name: exporter
+          image: quay.io/tiraboschi/kubevirt-io-latency-exporter:latest
+          imagePullPolicy: Always
+
+          args:
+            # Restrict to specific namespaces, or remove the flag to watch all.
+            #- --namespaces=production,staging
+            # Restrict to a subset of VMs by label, e.g.:
+            #- --label-filter=environment=production
+            - --poll-interval=30s
+            - --port=9100
+
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
+
+          securityContext:
+            privileged: true   # needed to follow /proc/<pid>/root across namespaces
+            runAsUser: 0
+
+          volumeMounts:
+            - name: crio-socket
+              mountPath: /run/crio/crio.sock
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9100
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+      volumes:
+        - name: crio-socket
+          hostPath:
+            path: /run/crio/crio.sock
+            type: Socket

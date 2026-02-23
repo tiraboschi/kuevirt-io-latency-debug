@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubevirt-io-latency-exporter
+  namespace: openshift-cnv
+  labels:
+    app: kubevirt-io-latency-exporter
+spec:
+  # ClusterIP: Prometheus reaches each pod through the Service endpoints.
+  clusterIP: None   # headless — ServiceMonitor will scrape each pod individually
+  selector:
+    app: kubevirt-io-latency-exporter
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+      protocol: TCP
