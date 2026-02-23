@@ -42,6 +42,7 @@ func main() {
 		namespacesRaw  = flag.String("namespaces", "", "Comma-separated namespace list to monitor (empty = all)")
 		labelFilterRaw = flag.String("label-filter", "", `Pod label selector, e.g. "environment=prod,tier=db"`)
 		pollInterval   = flag.Duration("poll-interval", 30*time.Second, "How often to reconcile the running VMI set")
+		qmpTimeout     = flag.Duration("qmp-timeout", 5*time.Second, "Per-call deadline for QMP operations (QueryBlockStats, block-latency-histogram-set)")
 		// Bucket boundaries can be overridden for environments with different
 		// latency profiles.  Values are in nanoseconds.
 		boundariesRaw = flag.String("boundaries",
@@ -76,6 +77,7 @@ func main() {
 		LabelFilter:  labelFilter,
 		CRIOClient:   crioClient,
 		PollInterval: *pollInterval,
+		QMPTimeout:   *qmpTimeout,
 		Boundaries:   boundaries,
 	})
 

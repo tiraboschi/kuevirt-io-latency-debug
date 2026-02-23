@@ -18,6 +18,7 @@ package qmp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net"
 	"path/filepath"
@@ -152,7 +153,7 @@ func TestQueryBlockStats(t *testing.T) {
 	}
 	defer c.Close()
 
-	stats, err := c.QueryBlockStats()
+	stats, err := c.QueryBlockStats(context.Background())
 	if err != nil {
 		t.Fatalf("QueryBlockStats: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestSetHistogramBoundaries(t *testing.T) {
 	defer c.Close()
 
 	want := []int64{1_000_000, 10_000_000, 100_000_000}
-	if err := c.SetHistogramBoundaries("drive-ua-rootdisk", want); err != nil {
+	if err := c.SetHistogramBoundaries(context.Background(), "drive-ua-rootdisk", want); err != nil {
 		t.Fatalf("SetHistogramBoundaries: %v", err)
 	}
 	if capturedID != "drive-ua-rootdisk" {
@@ -234,7 +235,7 @@ func TestQMPErrorResponse(t *testing.T) {
 	}
 	defer c.Close()
 
-	_, err = c.QueryBlockStats()
+	_, err = c.QueryBlockStats(context.Background())
 	if err == nil {
 		t.Fatal("expected error from QMP error response, got nil")
 	}
@@ -295,7 +296,7 @@ func TestSkipsAsyncEvents(t *testing.T) {
 	}
 	defer c.Close()
 
-	stats, err := c.QueryBlockStats()
+	stats, err := c.QueryBlockStats(context.Background())
 	if err != nil {
 		t.Fatalf("QueryBlockStats after async event: %v", err)
 	}

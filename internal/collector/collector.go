@@ -41,6 +41,9 @@ type Config struct {
 	LabelFilter  map[string]string // matched against pod labels via CRI
 	CRIOClient   *crio.Client
 	PollInterval time.Duration
+	// QMPTimeout is the per-call deadline for QueryBlockStats and
+	// SetHistogramBoundaries.  Defaults to 5s if zero.
+	QMPTimeout time.Duration
 	// Bucket boundaries in nanoseconds, passed to block-latency-histogram-set.
 	Boundaries []int64
 }
@@ -84,6 +87,9 @@ type Collector struct {
 
 // New creates a Collector.  Call Start to begin background reconciliation.
 func New(cfg Config) *Collector {
+	if cfg.QMPTimeout == 0 {
+		cfg.QMPTimeout = 5 * time.Second
+	}
 	constLabels := prometheus.Labels{"node": cfg.NodeName}
 	varLabels := []string{"namespace", "vmi", "drive", "operation"}
 
@@ -158,10 +164,16 @@ func (c *Collector) collectDomain(d *domain, ch chan<- prometheus.Metric) error 
 		return nil
 	}
 
-	stats, err := d.qmpClient.QueryBlockStats()
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QMPTimeout)
+	defer cancel()
+
+	stats, err := d.qmpClient.QueryBlockStats(ctx)
 	if err != nil {
 		return fmt.Errorf("query-blockstats: %w", err)
 	}
+
+	// Arm histograms for any new or previously-failed devices (idempotent).
+	c.armHistograms(ctx, d, stats)
 
 	for _, bs := range stats {
 		alias, ok := extractDiskAlias(bs.Device, bs.QDev)
@@ -187,34 +199,41 @@ func (c *Collector) emitOperation(
 ) {
 	lv := []string{d.namespace, d.vmiName, drive, operation}
 
-	ch <- prometheus.MustNewConstMetric(c.countDesc, prometheus.CounterValue, float64(count), lv...)
-	ch <- prometheus.MustNewConstMetric(c.sumDesc, prometheus.CounterValue, float64(sum), lv...)
+	if hist != nil && len(hist.Bins) > 0 {
+		cumulative := hist.CumulativeBins()
+		// The histogram accumulates only from when block-latency-histogram-set
+		// was called, whereas RdOperations/WrOperations/FlushOperations count
+		// from QEMU start.  Using the raw operation counters as _count would
+		// make +Inf < count, violating the Prometheus histogram invariant and
+		// breaking histogram_quantile.  Use the histogram total instead so
+		// that _count == +Inf at all times.
+		histTotal := cumulative[len(cumulative)-1]
+		ch <- prometheus.MustNewConstMetric(c.countDesc, prometheus.CounterValue, float64(histTotal), lv...)
+		ch <- prometheus.MustNewConstMetric(c.sumDesc, prometheus.CounterValue, float64(sum), lv...)
 
-	if hist == nil || len(hist.Bins) == 0 {
+		// Emit one bucket per boundary; QEMU gives N boundaries and N+1 bins.
+		// cumulative[i] covers observations ≤ hist.Boundaries[i].
+		for i, boundary := range hist.Boundaries {
+			if i >= len(cumulative) {
+				break
+			}
+			ch <- prometheus.MustNewConstMetric(
+				c.bucketDesc, prometheus.CounterValue, float64(cumulative[i]),
+				append(lv, strconv.FormatInt(boundary, 10))...,
+			)
+		}
+		// +Inf bucket must equal _count.
+		ch <- prometheus.MustNewConstMetric(
+			c.bucketDesc, prometheus.CounterValue, float64(histTotal),
+			append(lv, "+Inf")...,
+		)
 		return
 	}
 
-	cumulative := hist.CumulativeBins()
-
-	// Emit one bucket per boundary; QEMU gives N boundaries and N+1 bins.
-	// cumulative[i] covers observations ≤ hist.Boundaries[i].
-	for i, boundary := range hist.Boundaries {
-		if i >= len(cumulative) {
-			break
-		}
-		ch <- prometheus.MustNewConstMetric(
-			c.bucketDesc, prometheus.CounterValue, float64(cumulative[i]),
-			append(lv, strconv.FormatInt(boundary, 10))...,
-		)
-	}
-
-	// +Inf bucket: mandatory for Prometheus histograms; equals total count.
-	if len(cumulative) > 0 {
-		ch <- prometheus.MustNewConstMetric(
-			c.bucketDesc, prometheus.CounterValue, float64(cumulative[len(cumulative)-1]),
-			append(lv, "+Inf")...,
-		)
-	}
+	// No histogram yet (arming pending or not yet reflected in this scrape):
+	// emit raw counters only; no bucket metrics until arming succeeds.
+	ch <- prometheus.MustNewConstMetric(c.countDesc, prometheus.CounterValue, float64(count), lv...)
+	ch <- prometheus.MustNewConstMetric(c.sumDesc, prometheus.CounterValue, float64(sum), lv...)
 }
 
 // --- reconciliation loop ---
@@ -291,7 +310,9 @@ func (c *Collector) reconcile(ctx context.Context) {
 	}
 }
 
-// connectDomain connects to virtqemud and arms latency histograms for all KubeVirt disks.
+// connectDomain connects to virtqemud and attempts to arm latency histograms
+// for all KubeVirt disks.  If the initial blockstats fetch fails, arming is
+// deferred to the first collectDomain call.
 func (c *Collector) connectDomain(cm crio.ContainerMeta) (*domain, error) {
 	sockPath, err := findVirtqemudSocket(cm.PID)
 	if err != nil {
@@ -315,21 +336,29 @@ func (c *Collector) connectDomain(cm crio.ContainerMeta) (*domain, error) {
 		armed:       make(map[string]bool),
 	}
 
-	if err := c.armHistograms(d); err != nil {
-		// Non-fatal: metrics without histograms still expose count/sum.
-		slog.Warn("Histogram arm failed, will retry on next scrape",
+	// Best-effort: arm histograms immediately if possible.  collectDomain
+	// calls armHistograms on every scrape (idempotent via d.armed), so any
+	// devices that fail here — or disks hot-plugged later — are picked up
+	// automatically on the next scrape.
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QMPTimeout)
+	defer cancel()
+
+	stats, err := d.qmpClient.QueryBlockStats(ctx)
+	if err != nil {
+		slog.Warn("Initial blockstats fetch failed; histograms will be armed on first scrape",
 			"vmi", cm.VMIName, "error", err)
+	} else {
+		c.armHistograms(ctx, d, stats)
 	}
 	return d, nil
 }
 
-// armHistograms calls block-latency-histogram-set once per KubeVirt disk.
-// Idempotent: already-armed devices are skipped via d.armed.
-func (c *Collector) armHistograms(d *domain) error {
-	stats, err := d.qmpClient.QueryBlockStats()
-	if err != nil {
-		return err
-	}
+// armHistograms calls block-latency-histogram-set for every KubeVirt disk that
+// has not yet been armed.  stats must come from a QueryBlockStats call made
+// by the caller.  The method is idempotent: already-armed devices (tracked in
+// d.armed) are skipped, so it is safe to call on every scrape and handles
+// hot-plugged disks automatically.
+func (c *Collector) armHistograms(ctx context.Context, d *domain, stats qmp.BlockStatsList) {
 	for _, bs := range stats {
 		if _, ok := extractDiskAlias(bs.Device, bs.QDev); !ok {
 			continue
@@ -347,7 +376,7 @@ func (c *Collector) armHistograms(d *domain) error {
 		if d.armed[id] {
 			continue
 		}
-		if err := d.qmpClient.SetHistogramBoundaries(id, c.cfg.Boundaries); err != nil {
+		if err := d.qmpClient.SetHistogramBoundaries(ctx, id, c.cfg.Boundaries); err != nil {
 			slog.Warn("block-latency-histogram-set failed",
 				"device", id, "vmi", d.vmiName, "error", err)
 			continue
@@ -355,7 +384,6 @@ func (c *Collector) armHistograms(d *domain) error {
 		d.armed[id] = true
 		slog.Info("Histogram armed", "device", id, "vmi", d.vmiName)
 	}
-	return nil
 }
 
 // --- helpers ---

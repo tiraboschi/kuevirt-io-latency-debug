@@ -27,9 +27,11 @@ package qmp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"time"
 
 	libvirt "github.com/digitalocean/go-libvirt"
 	"github.com/digitalocean/go-libvirt/socket/dialers"
@@ -47,7 +49,7 @@ const qmpFlag uint32 = 0
 // by a raw QMP socket (tests) or by virtqemud via the libvirt remote protocol
 // (production).
 type Client struct {
-	execFn  func(command string, args any) (json.RawMessage, error)
+	execFn  func(ctx context.Context, command string, args any) (json.RawMessage, error)
 	closeFn func() error
 }
 
@@ -80,7 +82,11 @@ func DialViaLibvirt(virtqemudSockPath, domainName string) (*Client, error) {
 	}
 
 	return &Client{
-		execFn: func(command string, args any) (json.RawMessage, error) {
+		execFn: func(ctx context.Context, command string, args any) (json.RawMessage, error) {
+			if dl, ok := ctx.Deadline(); ok {
+				conn.SetDeadline(dl)
+				defer conn.SetDeadline(time.Time{})
+			}
 			return execViaLibvirt(lv, dom, command, args)
 		},
 		closeFn: func() error { return lv.Disconnect() },
@@ -101,7 +107,13 @@ func Dial(sockPath string) (*Client, error) {
 		return nil, err
 	}
 	return &Client{
-		execFn:  raw.execute,
+		execFn: func(ctx context.Context, command string, args any) (json.RawMessage, error) {
+			if dl, ok := ctx.Deadline(); ok {
+				conn.SetDeadline(dl)
+				defer conn.SetDeadline(time.Time{})
+			}
+			return raw.execute(command, args)
+		},
 		closeFn: conn.Close,
 	}, nil
 }
@@ -112,8 +124,9 @@ func Dial(sockPath string) (*Client, error) {
 // "/machine/peripheral/ua-rootdisk/virtio-backend") which QEMU also accepts
 // as the id parameter.  Calling this more than once resets the counters; the
 // collector tracks which devices have been initialised and calls this once.
-func (c *Client) SetHistogramBoundaries(id string, boundaries []int64) error {
-	_, err := c.execFn("block-latency-histogram-set", map[string]any{
+// ctx is used to enforce a deadline on the underlying socket write+read.
+func (c *Client) SetHistogramBoundaries(ctx context.Context, id string, boundaries []int64) error {
+	_, err := c.execFn(ctx, "block-latency-histogram-set", map[string]any{
 		"id":         id,
 		"boundaries": boundaries,
 	})
@@ -121,8 +134,9 @@ func (c *Client) SetHistogramBoundaries(id string, boundaries []int64) error {
 }
 
 // QueryBlockStats returns the current block statistics for all devices.
-func (c *Client) QueryBlockStats() (BlockStatsList, error) {
-	ret, err := c.execFn("query-blockstats", nil)
+// ctx is used to enforce a deadline on the underlying socket write+read.
+func (c *Client) QueryBlockStats(ctx context.Context) (BlockStatsList, error) {
+	ret, err := c.execFn(ctx, "query-blockstats", nil)
 	if err != nil {
 		return nil, err
 	}

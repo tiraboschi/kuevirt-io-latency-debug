@@ -267,11 +267,12 @@ func TestCollectMetrics(t *testing.T) {
 		NodeName:   "test-node",
 		Boundaries: []int64{1_000_000, 10_000_000},
 	})
-	// Inject the domain directly (white-box); armed=nil is safe for reads.
+	// Inject the domain directly (white-box).
 	col.domains["test-container"] = &domain{
 		vmiName:   "test-vm",
 		namespace: "test-ns",
 		qmpClient: qmpClient,
+		armed:     make(map[string]bool),
 	}
 
 	metrics := gatherMetrics(t, col)
@@ -385,7 +386,7 @@ func TestCollectSkipsNonKubeVirtDevices(t *testing.T) {
 	t.Cleanup(func() { qmpClient.Close() })
 
 	col := New(Config{NodeName: "n", Boundaries: []int64{1_000_000}})
-	col.domains["test"] = &domain{vmiName: "vm", namespace: "ns", qmpClient: qmpClient}
+	col.domains["test"] = &domain{vmiName: "vm", namespace: "ns", qmpClient: qmpClient, armed: make(map[string]bool)}
 
 	metrics := gatherMetrics(t, col)
 	if len(metrics) != 0 {
@@ -421,7 +422,7 @@ func TestCollectWithoutHistogram(t *testing.T) {
 	t.Cleanup(func() { qmpClient.Close() })
 
 	col := New(Config{NodeName: "n", Boundaries: []int64{1_000_000}})
-	col.domains["test"] = &domain{vmiName: "vm", namespace: "ns", qmpClient: qmpClient}
+	col.domains["test"] = &domain{vmiName: "vm", namespace: "ns", qmpClient: qmpClient, armed: make(map[string]bool)}
 
 	metrics := gatherMetrics(t, col)
 
