@@ -1,7 +1,8 @@
-IMAGE ?= quay.io/tiraboschi/kubevirt-io-latency-exporter
-TAG   ?= latest
+IMAGE     ?= quay.io/tiraboschi/kubevirt-io-latency-exporter
+TAG       ?= latest
+PLATFORMS ?= linux/amd64,linux/arm64
 
-.PHONY: build image push deploy undeploy fmt vet tidy lint test
+.PHONY: build image push image-multiarch push-multiarch deploy undeploy fmt vet tidy lint test
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/exporter ./cmd/exporter
@@ -11,6 +12,12 @@ image:
 
 push: image
 	podman push $(IMAGE):$(TAG)
+
+image-multiarch:
+	podman build --platform $(PLATFORMS) --manifest $(IMAGE):$(TAG) .
+
+push-multiarch: image-multiarch
+	podman manifest push --all $(IMAGE):$(TAG) docker://$(IMAGE):$(TAG)
 
 
 ##@ Linting
