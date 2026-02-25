@@ -1,0 +1,233 @@
+{
+  "title": "KubeVirt VMI Storage Latency",
+  "uid": "kubevirt-io-latency",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["kubevirt", "storage", "latency"],
+  "templating": {
+    "list": [
+      {
+        "name": "vm",
+        "label": "VM",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "definition": "label_values(kubevirt_vmi_storage_latency_ns_count, vm)",
+        "query": {
+          "query": "label_values(kubevirt_vmi_storage_latency_ns_count, vm)",
+          "refId": "StandardVariableQuery"
+        },
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "operation",
+        "label": "Operation",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "definition": "label_values(kubevirt_vmi_storage_latency_ns_count, operation)",
+        "query": {
+          "query": "label_values(kubevirt_vmi_storage_latency_ns_count, operation)",
+          "refId": "StandardVariableQuery"
+        },
+        "multi": true,
+        "includeAll": true,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "IOPS by VM and Operation (ops/s)",
+      "description": "Rate of I/O operations per second, split by VM and operation type.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (vm, operation) (\n  rate(kubevirt_vmi_storage_latency_ns_count{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n)",
+          "legendFormat": "{{vm}} / {{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "spanNulls": false }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
+      "id": 2,
+      "title": "P99 Write Latency by VM (ms)",
+      "description": "99th percentile write latency per VM.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99,\n  sum by (vm, le) (\n    rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=\"write\"}[5m])\n  )\n) / 1e6",
+          "legendFormat": "{{vm}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "spanNulls": false }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Worst-case Write Latency by VM (ms)",
+      "description": "Upper bound of the highest non-empty latency bucket per VM. Returns +Inf if any write exceeded the outermost boundary (60 s).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(1.0,\n  sum by (vm, le) (\n    rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=\"write\"}[5m])\n  )\n) / 1e6",
+          "legendFormat": "{{vm}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "spanNulls": false }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Latency Percentiles by VM and Operation (ms)",
+      "description": "P50, P95, and P99 latency per VM and operation type.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50,\n  sum by (vm, operation, le) (\n    rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n  )\n) / 1e6",
+          "legendFormat": "p50 {{vm}} / {{operation}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95,\n  sum by (vm, operation, le) (\n    rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n  )\n) / 1e6",
+          "legendFormat": "p95 {{vm}} / {{operation}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99,\n  sum by (vm, operation, le) (\n    rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n  )\n) / 1e6",
+          "legendFormat": "p99 {{vm}} / {{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "spanNulls": false }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Average Latency by VM and Operation (ms)",
+      "description": "Estimated average latency. _sum is approximated from bucket midpoints.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (vm, operation) (\n  rate(kubevirt_vmi_storage_latency_ns_sum{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n)\n/\nsum by (vm, operation) (\n  rate(kubevirt_vmi_storage_latency_ns_count{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n)\n/ 1e6",
+          "legendFormat": "{{vm}} / {{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "spanNulls": false }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Fraction of Writes Completing Under 1 ms",
+      "description": "Proportion of write operations with latency <= 1 ms per VM.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (vm) (\n  rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=\"write\", le=\"1000000\"}[5m])\n)\n/\nsum by (vm) (\n  rate(kubevirt_vmi_storage_latency_ns_count{vm=~\"$vm\", operation=\"write\"}[5m])\n)",
+          "legendFormat": "{{vm}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "lineWidth": 1, "fillOpacity": 10, "spanNulls": false }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Write Latency Heatmap",
+      "description": "Distribution of write latencies across histogram buckets. Narrow the VM and Operation filters above for a clearer view.",
+      "type": "heatmap",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (le) (\n  rate(kubevirt_vmi_storage_latency_ns_bucket{vm=~\"$vm\", operation=~\"$operation\"}[5m])\n)",
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "ns", "decimals": 0 },
+        "color": { "scheme": "Oranges", "fill": "dark-orange", "mode": "scheme" },
+        "tooltip": { "show": true, "yHistogram": false },
+        "cellGap": 1
+      },
+      "fieldConfig": { "defaults": {} }
+    }
+  ]
+}

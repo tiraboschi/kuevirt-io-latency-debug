@@ -1,0 +1,19 @@
+services:
+  victoriametrics:
+    image: docker.io/victoriametrics/victoria-metrics:latest
+    ports:
+      - "8428:8428"
+    command: ["-retentionPeriod=1y"]
+
+  grafana:
+    image: docker.io/grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro,Z
+      - ./grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
+    depends_on:
+      - victoriametrics
