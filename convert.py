@@ -15,6 +15,10 @@ Metrics emitted:
                                             per-operation latency totals)
 
 Labels: vm, drive, operation (read|write|flush), le (bucket boundary or +Inf)
+
+The 'drive' label value is taken from the 'disk_alias' field embedded in each
+JSON record (emitted by kubevirt-qmp-latency-histogram.sh). The --drive flag
+acts as a fallback for records that pre-date that field.
 """
 
 import argparse
@@ -46,10 +50,11 @@ def emit_headers():
     ]
 
 
-def convert_record(data, drive):
+def convert_record(data, default_drive):
     """Convert a single QMP record to OpenMetrics lines."""
     lines = []
     vm = data["vm_name"]
+    drive = data.get("disk_alias", default_drive)
     ts = f"{dateutil_parser.isoparse(data['timestamp']).timestamp():.3f}"
     stats = data.get("stats", {})
 
@@ -126,7 +131,8 @@ def main():
     ap.add_argument(
         "--drive",
         default="rootdisk",
-        help="Drive alias for the 'drive' label (default: rootdisk)",
+        help="Fallback drive alias for the 'drive' label when a record does not "
+             "contain a 'disk_alias' field (default: rootdisk)",
     )
     args = ap.parse_args()
 
@@ -138,7 +144,7 @@ def main():
 
     lines = emit_headers()
     for record in parse_ndjson(text):
-        lines.extend(convert_record(record, args.drive))
+        lines.extend(convert_record(record, args.drive))  # args.drive is the fallback
     lines.append("# EOF")
 
     output = "\n".join(lines) + "\n"
