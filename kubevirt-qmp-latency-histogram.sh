@@ -6,6 +6,13 @@ DISK_ALIAS=${3:-rootdisk}
 
 VMNAMESPACE="virtual-machines"
 
+# Prefer oc (OpenShift CLI) when available, fall back to kubectl.
+if command -v oc &>/dev/null; then
+    KUBECTL=oc
+else
+    KUBECTL=kubectl
+fi
+
 # Each entry is either "vmname" (uses DISK_ALIAS as default) or
 # "vmname,disk1,disk2,..." to specify one or more disk aliases explicitly.
 VM_NAMES=(
@@ -36,7 +43,7 @@ fi
 
 find_pod() {
     local vm_name=$1
-    kubectl get pods -n "$VMNAMESPACE" -l "vm.kubevirt.io/name=$vm_name" \
+    $KUBECTL get pods -n "$VMNAMESPACE" -l "vm.kubevirt.io/name=$vm_name" \
         --field-selector=status.phase=Running \
         -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | head -n1
 }
@@ -56,7 +63,7 @@ setup_vm() {
     echo "[$VM_NAME/$DISK] Targeting Pod: $POD_NAME" >&2
 
     # Boundaries are in nanoseconds
-    kubectl exec -n "$VMNAMESPACE" "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
+    $KUBECTL exec -n "$VMNAMESPACE" "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
         '{"execute": "block-latency-histogram-set", "arguments": {"id": "'"$TARGET_ID"'", "boundaries": [     1000000,
                                                                                                            10000000,
                                                                                                           100000000,
@@ -81,7 +88,7 @@ query_vm() {
     DEVICE="/machine/peripheral/ua-$DISK/virtio-backend"
     echo "[$VM_NAME/$DISK] Targeting Pod: $POD_NAME" >&2
 
-    kubectl exec -n "$VMNAMESPACE" "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
+    $KUBECTL exec -n "$VMNAMESPACE" "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
         '{"execute": "query-blockstats"}' | \
         jq --arg qdev "$DEVICE" '.return[] | select(.qdev == $qdev or .device == $qdev)' | \
         jq --arg vm_name "$VM_NAME" --arg disk_alias "$DISK" --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
