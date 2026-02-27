@@ -74,6 +74,23 @@ setup_vm() {
                                                                                                        ]}}'
 }
 
+scan_vm() {
+    local VM_NAME=$1
+    local POD_NAME
+
+    POD_NAME=$(find_pod "$VM_NAME")
+    if [ -z "$POD_NAME" ]; then
+        echo "Error: Could not find running pod for VM $VM_NAME" >&2
+        return 1
+    fi
+
+    local disks
+    disks=$($KUBECTL exec -n "$VMNAMESPACE" "$POD_NAME" -c compute -- virsh qemu-monitor-command 1 \
+        '{"execute": "query-blockstats"}' | \
+        jq -r '[.return[] | .qdev // "" | select(startswith("/machine/peripheral/ua-")) | split("/")[3] | ltrimstr("ua-")] | unique | join(" ")')
+    echo "[$VM_NAME] disks: $disks"
+}
+
 query_vm() {
     local VM_NAME=$1
     local DISK=$2
@@ -96,6 +113,13 @@ query_vm() {
 }
 
 case "$CMD" in
+  scan)
+    for VM_ENTRY in "${VM_NAMES[@]}"; do
+        IFS=',' read -r VM_NAME _ <<< "$VM_ENTRY"
+        scan_vm "$VM_NAME"
+    done
+    ;;
+
   setup)
     for VM_ENTRY in "${VM_NAMES[@]}"; do
         IFS=',' read -r VM_NAME _ <<< "$VM_ENTRY"
@@ -134,8 +158,9 @@ case "$CMD" in
 UNKNOWN COMMAND '$CMD'
 
 Usage:
-$0 setup|query|collect [interval_minutes] [disk_alias]
+$0 scan|setup|query|collect [interval_minutes] [disk_alias]
 
+  scan                          List all block devices found on each VM
   setup                         Enable latency histograms on all VMs
   query                         Query latency histograms once for all VMs
   collect [N] [disk_alias]      Query repeatedly every N minutes (default: 5, disk: rootdisk)
