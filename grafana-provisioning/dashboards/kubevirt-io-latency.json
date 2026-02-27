@@ -5,7 +5,7 @@
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-3h", "to": "now" },
-  "timezone": "browser",
+  "timezone": "utc",
   "tags": ["kubevirt", "storage", "latency"],
   "templating": {
     "list": [
